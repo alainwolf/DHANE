@@ -10,7 +10,7 @@ Its easy to shoot yourself in the foot with TLSA entries, and render your **serv
 
 After that has happened, it will take at minimum the TTL of your DNS records, to pull the bullet out of your foot again and stop the bleeding.
 
-Please, try this first at home, with some inexistent or unimportant services.
+Please try this at home, with some inexistent or unimportant services, first.
 
 ## Requirements
 
