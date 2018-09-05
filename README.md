@@ -17,7 +17,6 @@ Please try this at home, with some inexistent or unimportant services, first.
 ### PowerDNS Authoritative Server
 Since I use PowerDNS myself, its written for its command and control utility.
 The script call **pdnsutil** to create the records in DNS.
-But it should mot be to difficult adapt it for other utilities.
 It also uses **dig** for DNS queuries.
 
 ## Installation
