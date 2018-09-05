@@ -69,4 +69,4 @@ Besides that you can customize the TTL of your DNS records, and pick your favori
 
 ## ACKs
 
-Most thanks go to @/github/lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
+Most thanks go to @github/lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
