@@ -74,16 +74,3 @@ All the credit goes to @lukas2511 and contributors for dehydrated. And to Let's 
 Empty lines, spaces and lines beginning with # are ignored.
 
 The DNS records can be in different domains, as long as **pdnsutil** is able to create records in it.
-
-
-## Configuration
-
-You need to set the IP address of your DNS master in the script. 
-
-Besides that you can customize the TTL of your DNS records, and pick your favorites from the usual menu of TLSA **usage flags**, **selectors** and **mtypes**, While the set defaults are sane, selector 0 (full certificate in DNS) is not implemented.
-
-## Limitations
-
- * Support for private key roll-over has not been implemented yet.
- * It never deletes any DNS records. Just checks if the required ones are already there and adds new ones as needed.
- * Did I mention that this hasn't been tested much?
