@@ -8,19 +8,17 @@ This has been cobbled together rather quickly and it hasn't been tested very muc
 
 Its easy to shoot yourself in the foot with TLSA entries, and render your **services unusable** and **all of your mail undeliverable**. 
 
-After that has happened, it will take at minimum the TTL of your DNS records, to pull the bullet out of your foot again.
+After that has happened, it will take at minimum the TTL of your DNS records, to pull the bullet out of your foot again and stop the bleeding.
 
-Please, try it first with some inexistent or unimportant services.
+Please, try this first at home, with some inexistent or unimportant services.
 
 ## Requirements
-
-### A DNSSEC Enabled Domain
-DNSSEC is mandatory for DANE and TLSA.
 
 ### PowerDNS Authoritative Server
 Since I use PowerDNS myself, its written for its command and control utility.
 The script call **pdnsutil** to create the records in DNS.
 But it should mot be to difficult adapt it for other utilities.
+It also uses **dig** for DNS queuries.
 
 ## Installation
 Call it in your dehydrated [hook script](https://github.com/lukas2511/dehydrated/blob/master/docs/examples/hook.sh) with the **deploy_cert()** and maybe also **unchanged_cert()** hook.
@@ -52,11 +50,9 @@ _443._tcp.webmail.example.net
 _443._tcp.webmail.example.org
 
 ```
-
 Empty lines, spaces and lines beginning with # are ignored.
 
 The DNS records can be in different domains, as long as **pdnsutil** is able to create records in it.
-
 
 ## Configuration
 
@@ -75,10 +71,6 @@ Besides that you can customize the TTL of your DNS records, and pick your favori
 ## ACKs
 
 All the credit goes to @lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
-_443._tcp.webmail.example.net
-_443._tcp.webmail.example.org
-
-```
 
 Empty lines, spaces and lines beginning with # are ignored.
 
