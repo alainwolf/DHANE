@@ -16,7 +16,7 @@ Please try this at home, with some inexistent or unimportant services, first.
 
 ### PowerDNS Authoritative Server
 Since I use PowerDNS myself, its written for its command and control utility.
-The script call **pdnsutil** to create the records in DNS.
+The script calls **pdnsutil** to create the records in DNS.
 It also uses **dig** for DNS queuries.
 
 ## Installation
@@ -69,8 +69,4 @@ Besides that you can customize the TTL of your DNS records, and pick your favori
 
 ## ACKs
 
-All the credit goes to @lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
-
-Empty lines, spaces and lines beginning with # are ignored.
-
-The DNS records can be in different domains, as long as **pdnsutil** is able to create records in it.
+Most thanks go to @/github/lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
