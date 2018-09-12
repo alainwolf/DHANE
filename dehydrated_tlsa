@@ -1,36 +1,31 @@
 #!/bin/bash
 #
-# Dehydrated Authentication of Named Entities
-# A plug-in for dehydrated to create DNS TLSA records.
+# Let's Encrypt Dehydrated Hook Script/Plug-in to create/update DNS TLSA records
 #
-# https://github.com/alainwolf/DHANE
 #
-
-# Turn on debug output
-#set -x
 
 # Bail out on errors
 set -e
 # Bail out on unknown var
 set -u
 
-#
-# Settings
-#
+# -----------------
+# Start of Settings
+# -----------------
 
 # Name server to query for TLSA records
-# Preferably the authoritative master server to avoid cached results.
-dns_server="127.0.0.1"
+# Your authoritative master server to avoid cached or out-of-date results.
+dns_server="2a02:168:4a01::41"
 
-# DNS TLSA record time-to-live
+# DNS TLSA record TTL (Time-To-Tive) in seconds.
 # Optional: Use an empty string to use your servers/domain default TTL
-tlsa_ttl="900"
+tlsa_ttl=""
 
 # TLSA usage flag: 
-#   0: PKIX-TA: Certificate Authority Constraint
-#   1: PKIX-EE: Service Certificate Constraint
-#   2: DANE-TA: Trust Anchor Assertion
-#   3: DANE-EE: Domain Issued Certificate
+#   0: PKIX-TA: CA certificate or public key with PKIX validation.
+#   1: PKIX-EE: Service certificate or public key with PKIX validation.
+#   2: DANE-TA: CA certificate or public key.
+#   3: DANE-EE: Service certificate or public key.
 tlsa_usage="3"
 
 # TLSA selector:
@@ -38,90 +33,213 @@ tlsa_usage="3"
 #   1: Public key only (recommended)
 tlsa_selector="1"
 
-# TLSA content type:
-# ~~0: Full cert or public key~~ (Not recommended! Not supported!)
-#   1: SHA256 hash of cert or public key
-#   2: SHA512 hash of cert or public key (Recommended)
+# TLSA content matching type:
+#   0: Full certificate or public key (Not recommended! Not implemented!)
+#   1: SHA256 hash of cert or public key (Recommended)
+#   2: SHA512 hash of cert or public key 
 tlsa_mtype=1
 
-#
+# ---------------
 # End of Settings
-#
+# ---------------
 
-DOMAIN="${2}" 
-#KEYFILE="${3}" 
-CERTFILE="${4}" 
-#FULLCHAINFILE="${5}" 
-CHAINFILE="${6}" 
-#TIMESTAMP="${7}"
+HOOK="$1"
+
+if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
+    #DOMAIN="$2" 
+    #KEYFILE="$3" 
+    CERTFILE="$4" 
+    #FULLCHAINFILE="$5" 
+    CHAINFILE="$6" 
+    #TIMESTAMP="$7"
+
+elif [[ ${HOOK} == 'clear_dns' ]]; then
+    CERTFILE="$2" 
+fi
+
+updated_zones=''
+
+# Calculate a hash from a DER blob in stdin, to be stored in DNS
+get_hash() {
+    openssl "$tlsa_hash_algo" | \
+        cut -d " " -f 2 | \
+           tr '[:upper:]' '[:lower:]'
+}
+
+# Get the DER formatted public key blob from a PEM certificate file.
+get_certfile_pubkey() {
+    openssl x509 -in "$1" -pubkey -noout | \
+        openssl pkey -pubin -outform DER
+}
+
+# Get the DER formatted public key blob from a PEM private key file.
+get_keyfile_pubkey() {
+    openssl pkey -in "$1" -pubout -outform DER
+}
+
+# Hash of a certificate file in PEM format.
+get_certfile_hash() {
+     openssl x509 -in "$1" --outform DER | get_hash
+}
+
+# Hash of the public key of PEM certificate file.
+get_certfile_pubkey_hash() {
+    get_certfile_pubkey "$1" | get_hash
+}
+
+# Hash of the public key of a PEM private key file.
+get_keyfile_pubkey_hash() {
+    get_keyfile_pubkey "$1" | get_hash 
+}
+
+# Get the zone part of FQDN DNS record
+get_dns_zone() {
+    local soa
+    
+    # Look-up the SOA in DNS to get the zone (space- or tab-delimited).
+    soa=$( dig @${dns_server} +noall +authority -t SOA -q "$1" )
+
+    # Word-splitting is the idea here:
+    # shellcheck disable=SC2086
+    set -- $soa
+    zone="$1"
+
+    # Remove trailing dot from zone name
+    zone=${zone%.}
+    echo "$zone"
+}
+
+create_dns_rr() {
+    local rr_name="$1" usage="$2" selector="$3" mtype="$4" hash="$5"
+    local rr_type="TLSA" rr_ttl="$tlsa_ttl" zone
+
+    # Get the zone part from the TLSA DNS record name
+    zone="$( get_dns_zone "$rr_name" )"
+
+    # Remove trailing dot and zone part from the FQDN
+    rr_name=${rr_name%".$zone"}
+
+    # Add TLSA entry in DNS
+    echo "  +     Zone: $zone"
+    echo "  +     Name: $rr_name"
+    echo "  +     Type: $rr_type"
+    echo "  +      TTL: $rr_ttl"
+    echo "  +    Usage: $usage"
+    echo "  + Selector: $selector"
+    echo "  +     Type: $mtype"
+    echo "  +     Hash: $hash"
+    rr_content="$usage $selector $mtype $hash"
+    pdnsutil add-record "$zone" "$rr_name" "$rr_type" $rr_ttl "$rr_content"
+    tlsa_dns_has_been_updated=1
+
+    # Uodate the list of modified zones
+    updated_zones=$( echo "$updated_zones $zone" | tr ' ' '\n' | sort -u )
+}
+
+# Delete *all existing TLSA records* with this records name from DNS.
+delete_dns_rr() {
+    local rr_name="$1" rr_type="TLSA" zone
+
+    # Get the zone part from the TLSA DNS record name
+    zone="$( get_dns_zone "$rr_name" )"
+
+    # Remove trailing dot and zone part from the FQDN
+    rr_name=${rr_name%".$zone"}
+
+    echo "  + Deleting all TLSA records for $rr_name from $zone!"
+    pdnsutil delete-rrset "$zone" "$rr_name" $rr_type
+    
+    # Uodate the list of modified zones
+    updated_zones=$( echo "$updated_zones $zone" | tr ' ' '\n' | sort -u )
+}
 
 tlsa_file="$( dirname "$CERTFILE" )/tlsa.txt"
 
 # Check if local cert directory has a TLSA records file
 if [[ -f $tlsa_file ]]; then
 
-    echo " + TLSA DNS records listing for $DOMAIN found."
+    echo " + DANE/TLSA names for $( basename "$( dirname "$CERTFILE" )" ) found."
     
-    # Set usage
-    case $tlsa_usage in
-        0 )
-            tlsa_cert=$CHAINFILE
-            ;;
-        1 )
-            tlsa_cert=$CERTFILE
-            ;;
-        2 )
-            tlsa_cert=$CHAINFILE
-            ;;
-        3 )
-            tlsa_cert=$CERTFILE
-            ;;
-        * )
-            echo "Error: Unknown usage flag (usage: ${tlsa_usage})!"
-            exit 1
-            ;;
-    esac
+    if [[ -f "$(dirname "$CERTFILE")/privkey.roll.pem" ]]; then
+        ROLLOVER_KEYFILE="$(dirname "$CERTFILE")/privkey.roll.pem"
+    else
+        ROLLOVER_KEYFILE=''
+    fi
 
-    # Set content type
-    case $tlsa_mtype in
-        0 )
-            echo "Sorry. Full certificate (mtype 0) is not supported here!."
-            exit 1
-            ;;
-        1 )
-            tlsa_hash_algo="sha256"
-            ;;
-        2 )
-            tlsa_hash_algo="sha512"
-            ;;
-        * )
-            echo "Error: Unknown content type (mtype: ${tlsa_mtype})!"
-            exit 1
-            ;;
-    esac
+    if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
 
-    # Calculate hash of cert or public key.
-    case $tlsa_selector in
-        0 )
-            # Get the full cert
-            echo " + Digesting cert $tlsa_cert with $tlsa_hash_algo ..."
-            tlsa_cert_hash=$( openssl x509 -in "$tlsa_cert" -outform DER | \
-                openssl $tlsa_hash_algo | cut -d " " -f 2 | \
-                    tr '[:upper:]' '[:lower:]' )
-            ;;
-        1 )
-            # Get the public key
-            echo " + Digesting public key of $tlsa_cert with $tlsa_hash_algo ..."
-            tlsa_cert_hash=$( openssl x509 -in "$tlsa_cert" -pubkey -noout | \
-                openssl pkey -pubin -outform DER | \
-                    openssl $tlsa_hash_algo | cut -d " " -f 2 | \
-                        tr '[:upper:]' '[:lower:]' )
-            ;;
-        * )
-            echo "Error: Unknown TLSA selector (selector: ${tlsa_mtype})!"
-            exit 1
-            ;;
-    esac
+        # Set usage
+        case $tlsa_usage in
+            0 )
+                tlsa_cert=$CHAINFILE
+                ;;
+            1 )
+                tlsa_cert=$CERTFILE
+                ;;
+            2 )
+                tlsa_cert=$CHAINFILE
+                ;;
+            3 )
+                tlsa_cert=$CERTFILE
+                ;;
+            * )
+                echo "Error: Unknown TLSA usage flag (usage: ${tlsa_usage})!" >&2
+                exit 1
+                ;;
+        esac
+
+        # Set content type
+        case $tlsa_mtype in
+            0 )
+                echo "Sorry. Full TLSA certificate (mtype 0) is not supported here!." >&2
+                exit 1
+                ;;
+            1 )
+                tlsa_hash_algo="sha256"
+                ;;
+            2 )
+                tlsa_hash_algo="sha512"
+                ;;
+            * )
+                echo "Error: Unknown TLSA content type (mtype: ${tlsa_mtype})!" >&2
+                exit 1
+                ;;
+        esac
+
+        # Calculate hash of cert or public key(s).
+        case $tlsa_selector in
+            0 )
+                # Hashing non-CA certs with roll-over keys present makes no sense.
+                if [[ -r $ROLLOVER_KEYFILE  && ( $tlsa_usage == "1" || $tlsa_usage == "3" ) ]]; then
+                    echo "ERROR: Roll-over key found, but full end-entity certificate set as selector (0)!" >&2
+                    echo "ERROR: The certificate for your roll-over key hasn't been created yet!" >&2
+                    exit 1
+                fi
+                # Hash the full cert
+                echo " + Digesting the active certificate with $tlsa_hash_algo ..."
+                tlsa_hash=$( get_certfile_hash "$tlsa_cert" )
+                ;;
+            1 )
+                # Hash the public key
+                echo " + Digesting the public key of the active certificate with $tlsa_hash_algo ..."
+                tlsa_hash="$( get_certfile_pubkey_hash "$tlsa_cert" )" 
+
+                # Do we have a roll-over key?
+                if [[ -r $ROLLOVER_KEYFILE ]]; then
+
+                    # Hash the roll-over public key
+                    echo " + Digesting the public roll-over key with $tlsa_hash_algo ..."
+                    tlsa_rollover_hash="$( get_keyfile_pubkey_hash $ROLLOVER_KEYFILE )"
+                else
+                    tlsa_rollover_hash=''
+                fi
+                ;;
+            * )
+                echo "ERROR: Unknown TLSA selector (selector: ${tlsa_selector})!" >&2
+                exit 1
+                ;;
+        esac
+    fi
 
     # Read the tlsa.txt file, line by line.
     # shellcheck disable=SC2162
@@ -141,93 +259,138 @@ if [[ -f $tlsa_file ]]; then
         # Read DNS record name
         tlsa_rr_name="${line}"
 
-        # Iterate over list of TLSA records requested in the tlsa.txt file
-        echo " ++ TLSA record $tlsa_rr_name found in configuration."
+    if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
 
-        # Assume nothing
-        tlsa_dns_needs_update=true
-        tlsa_dns_has_been_updated=false
+            # Iterate over list of TLSA records requested in the tlsa.txt file
+            echo "  + Processing TLSA name ${tlsa_rr_name}: "
 
-        # TODO: Check/compare subjAltNames of entries with requested RRs?
+            # Assume nothing
+            tlsa_dns_has_been_updated=0
 
-        # Query DNS for any existing TLSA records
-        echo " ++ Checking DNS for existing records ..."
-        tlsa_dns_answer=$( dig @${dns_server} +short +norecurse +nosplit \
-            -t TLSA -q "$tlsa_rr_name" )
+            # Query DNS for any existing TLSA records
+            echo -n "  + Looking up existing records in DNS ... "
+            tlsa_dns_answer=$( dig @${dns_server} +short +norecurse +nosplit \
+                -t TLSA -q "$tlsa_rr_name" )
 
-        # Found anything?
-        if [[ -n "$tlsa_dns_answer" ]]; then
+            # Found anything?
+            if [[ -n "$tlsa_dns_answer" ]]; then
 
-            # We found one or more TLSA records in DNS
+                # We found one or more TLSA records in DNS
 
-            # How many records (lines) are there?
-            tlsa_dns_rr_count="$(echo "$tlsa_dns_answer" | wc -l )"
-            echo " ++ Found $tlsa_dns_rr_count record(s) in DNS."
+                # How many records (lines) are there?
+                tlsa_dns_rr_count="$(echo "$tlsa_dns_answer" | wc -l )"
+                echo "found $tlsa_dns_rr_count record(s)."
 
-            # Iterate
-            for (( i = 1; i <= tlsa_dns_rr_count; i++ )); do
+                # Iterate over exiting DNS records
+                echo "   + Comparing $tlsa_dns_rr_count DNS record(s) with the public key of the active certificate ... "
+                for (( i = 1; i <= tlsa_dns_rr_count; i++ )); do
 
-                # Extract hash from current line of DNS answers
-                tlsa_dns_hash=$( echo "$tlsa_dns_answer" | sed -n "${i}"p | \
-                    cut -d " " -f 4 | tr '[:upper:]' '[:lower:]' )
+                    # Extract hash from current line of DNS answers
+                    tlsa_dns_hash=$( echo "$tlsa_dns_answer" | sed -n "${i}"p | \
+                        cut -d " " -f 4 | tr '[:upper:]' '[:lower:]' )
 
-                # Does this hash match with current certs hash?
-                echo " +++ Hash $i of $tlsa_dns_rr_count found in DNS: \"$tlsa_dns_hash\""
-                echo " +++         Hash of our cert: \"$tlsa_cert_hash\""
-                if [[ "$tlsa_dns_hash" == "$tlsa_cert_hash" ]]; then
-                
-                    # Match found, nothing to do
-                    echo " +++ Match found. No update needed."
-                    tlsa_dns_needs_update=false
-                    break
-                else
-                    echo " +++ No match found (yet)."
+                    # Does this hash match with current cert or key hash?
+                    echo -n "   + Comparing record $i of $tlsa_dns_rr_count ... "
+                    if [[ "$tlsa_dns_hash" == "$tlsa_hash" ]]; then
+                    
+                        # Active cert/key match found, nothing to do
+                        echo "match found (skipping update)."
+                        cert_dns_needs_update=0
+                        break
+                    else
+                        echo "no match."
+                    fi
+                    
+                    # If we ever get here, there was no match
+                    cert_dns_needs_update=1
+                done
+
+                if [[ ! -z $tlsa_rollover_hash ]]; then
+
+                    # Iterate over exiting DNS records
+                    echo "   + Comparing $tlsa_dns_rr_count DNS record(s) with the public roll-over key ... "
+                    for (( i = 1; i <= tlsa_dns_rr_count; i++ )); do
+
+                        # Extract hash from current line of DNS answers
+                        tlsa_dns_hash=$( echo "$tlsa_dns_answer" | sed -n "${i}"p | \
+                            cut -d " " -f 4 | tr '[:upper:]' '[:lower:]' )
+
+                        # Does this hash match with current roll-over key hash?
+                        echo -n "   + Comparing record $i of $tlsa_dns_rr_count ... "
+                        if [[ "$tlsa_dns_hash" == "$tlsa_rollover_hash" ]]; then
+                        
+                            # Rollover key match found, nothing to do
+                            echo "roll-over key match found (skipping update)."
+                            rollover_dns_needs_update=0
+                            break
+                        else
+                            echo "no match."
+                        fi
+
+                        # If we ever get here, there was no match
+                        rollover_dns_needs_update=1
+                    done
                 fi
-            done
-        else
-            echo " ++ No DNS records found. Update needed."
+            else
+                
+                # No DNS records found
+                echo "none found."
+                cert_dns_needs_update=1
+                if [[ ! -z $tlsa_rollover_hash ]]; then
+                    rollover_dns_needs_update=1
+                fi
+            fi
+
+            # Do we have to create a new TLSA RR in DNS?
+            if [[ $cert_dns_needs_update -eq 1 ]]; then
+
+                echo "  + Creating new active TLSA record in DNS."
+                create_dns_rr "$tlsa_rr_name" "$tlsa_usage" "$tlsa_selector" "$tlsa_mtype" "$tlsa_hash"
+                cert_dns_needs_update=0
+            fi
+
+            if [[ ! -z $tlsa_rollover_hash ]]; then
+                if [[ $rollover_dns_needs_update -eq 1 ]]; then
+
+                    echo "  + Creating new roll-over TLSA record in DNS."
+
+                    # A roll-over key always uses TLSA selector 1 (public key)
+                    create_dns_rr "$tlsa_rr_name" "$tlsa_usage" "1" "$tlsa_mtype" "$tlsa_rollover_hash"
+                    rollover_dns_needs_update=0
+                fi
+            fi
+
+        elif [[ ${HOOK} == 'clear_dns' ]]; then
+
+            # This is not an official dehydrated hook, but if things got messy
+            # in your DNS you can clear your DNS from all TLSA records found in
+            # the tlsa.txt file for a certificate.
+
+            # Note: This removes all DNS TLSA records with a matching name.
+            # Usage flag, selector, mtype and hashed are ignored. It might
+            # therefore also remove records created manually or by other tools!
+
+            # Calling example:
+            #   ./dehydrated_tlsa "clear_dns" "/etc/dehydrated/certs/example.net/cert.pem"
+
+            delete_dns_rr "$tlsa_rr_name" 
+            tlsa_dns_has_been_updated=1
         fi
 
-        # Do we have to create a new TLSA RR in DNS?
-        if [[ $tlsa_dns_needs_update = true ]]; then
-
-            # WTF? dig(1) out put is sometimes tab-delimited and sometimes
-            # space-delimited.
-            
-            # Look-up the SOA in DNS to get the zone (space-delimited).
-            soa=$( dig @${dns_server} +noall +authority -t SOA -q "$tlsa_rr_name" )
-            # Word-splitting is the idea here:
-            # shellcheck disable=SC2086
-            set -- $soa
-            zone="$1"
-
-            # Remove trailing dot from zone name
-            zone=${zone%.}
-
-            # Remove trailing dot and zone part from the FQDN
-            tlsa_name=${tlsa_rr_name%".$zone"}
-
-            # Add TLSA entry in DNS
-            echo " ++ Creating new TLSA record in DNS:"
-            echo " ++    Zone: $zone"
-            echo " ++    Name: $tlsa_name"
-            echo " ++    Hash: $tlsa_cert_hash"
-            tlsa_content="$tlsa_usage $tlsa_selector $tlsa_mtype $tlsa_cert_hash"
-            pdnsutil add-record "$zone" "$tlsa_name" TLSA $tlsa_ttl "$tlsa_content"
-            tlsa_dns_has_been_updated=true
-        fi
     done < "$tlsa_file"
 
     # Did we change anything in DNS?
-    if [[ $tlsa_dns_has_been_updated = true ]]; then
-        echo -n " + "
-        pdnsutil rectify-zone "$zone"
-        echo -n " + "
-        pdnsutil increase-serial "$zone"
+    if [[ $tlsa_dns_has_been_updated = 1 ]]; then
+        for zone in $updated_zones; do
+            echo " + DNS zone $zone has been altered:"
+            echo -n " + "
+            pdnsutil rectify-zone "$zone"
+            echo -n " + "
+            pdnsutil increase-serial "$zone"
+            echo -n " + "
+            pdnsutil check-zone "$zone"
+        done
     fi
-    
-    # Turn off debug output
-    set +x
 fi
 
 # -*- mode: bash; tab-width: 4; indent-tabs-mode: nil -*-
