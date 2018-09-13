@@ -1,7 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Let's Encrypt Dehydrated Hook Script/Plug-in to create/update DNS TLSA records
+# Let's Encrypt Dehydrated Hook Script/Plug-in to create DNS TLSA records
+# by Alain Wolf
+# https://github.com/alainwolf/DHANE
 #
+# This script is licensed under The MIT License (see LICENSE for more information).
 #
 
 # Bail out on errors
@@ -15,9 +18,9 @@ set -u
 
 # Name server to query for TLSA records
 # Your authoritative master server to avoid cached or out-of-date results.
-dns_server="2a02:168:4a01::41"
+dns_server="127.0.0.1"
 
-# DNS TLSA record TTL (Time-To-Tive) in seconds.
+# DNS TLSA record TTL (Time-To-Live) in seconds.
 # Optional: Use an empty string to use your servers/domain default TTL
 tlsa_ttl=""
 
@@ -46,6 +49,8 @@ tlsa_mtype=1
 HOOK="$1"
 
 if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
+
+    # Command-line submitted by dehydrated
     #DOMAIN="$2" 
     #KEYFILE="$3" 
     CERTFILE="$4" 
@@ -53,13 +58,25 @@ if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
     CHAINFILE="$6" 
     #TIMESTAMP="$7"
 
+    # Also exported by dehydrated:
+    # ALPNCERTDIR
+    # altnames
+    # BASEDIR 
+    # CERTDIR 
+    # CHALLENGETYPE#
+    # COMMAND
+    # CONFIG
+    # KEY_ALGO
+    # PRIVATE_KEY_ROLLOVER
+    # WELLKNOWN#
+
 elif [[ ${HOOK} == 'clear_dns' ]]; then
     CERTFILE="$2" 
 fi
 
 updated_zones=''
 
-# Calculate a hash from a DER blob in stdin, to be stored in DNS
+# Calculate a hash from the DER blob received by stdin, to be stored in DNS
 get_hash() {
     openssl "$tlsa_hash_algo" | \
         cut -d " " -f 2 | \
@@ -132,12 +149,12 @@ create_dns_rr() {
     pdnsutil add-record "$zone" "$rr_name" "$rr_type" $rr_ttl "$rr_content"
     tlsa_dns_has_been_updated=1
 
-    # Uodate the list of modified zones
+    # Update the list of modified zones
     updated_zones=$( echo "$updated_zones $zone" | tr ' ' '\n' | sort -u )
 }
 
 # Delete *all existing TLSA records* with this records name from DNS.
-delete_dns_rr() {
+delete_dns_rr_set() {
     local rr_name="$1" rr_type="TLSA" zone
 
     # Get the zone part from the TLSA DNS record name
@@ -149,7 +166,7 @@ delete_dns_rr() {
     echo "  + Deleting all TLSA records for $rr_name from $zone!"
     pdnsutil delete-rrset "$zone" "$rr_name" $rr_type
     
-    # Uodate the list of modified zones
+    # Update the list of modified zones
     updated_zones=$( echo "$updated_zones $zone" | tr ' ' '\n' | sort -u )
 }
 
@@ -373,7 +390,7 @@ if [[ -f $tlsa_file ]]; then
             # Calling example:
             #   ./dehydrated_tlsa "clear_dns" "/etc/dehydrated/certs/example.net/cert.pem"
 
-            delete_dns_rr "$tlsa_rr_name" 
+            delete_dns_rr_set "$tlsa_rr_name" 
             tlsa_dns_has_been_updated=1
         fi
 
