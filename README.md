@@ -17,7 +17,7 @@ Please try this at home, with some inexistent or unimportant services, first.
 ### PowerDNS Authoritative Server
 Since I use PowerDNS myself, its written for its command and control utility.
 The script calls **pdnsutil** to create the records in DNS.
-It also uses **dig** for DNS queuries.
+It also uses **dig** for DNS queries.
 
 ## Installation
 Call it in your dehydrated [hook script](https://github.com/lukas2511/dehydrated/blob/master/docs/examples/hook.sh) with the **deploy_cert()** and maybe also **unchanged_cert()** hook.
@@ -37,7 +37,7 @@ deploy_cert() {
 
 ## Defining TLSA Records
 
-For certificates which need TLSA DNS records, create a file called **tlsa.txt** in the certficates directory and add the FQDN records one by line:
+For certificates which need TLSA DNS records, create a file called **tlsa.txt** in the certificates directory and add the FQDN records one by line:
 
 ```
 #/etc/dehydrated/certs/mail.example.net/tlsa.txt
@@ -62,10 +62,10 @@ Besides that you can customize the TTL of your DNS records, and pick your favori
 ## Limitations
 
  * It never deletes any DNS records. Just checks if the required ones are already there and adds new ones as needed.
+ * It won't create TLSA records of un-hashed full certificates or public keys (mtype 0). 
  * While checking existing DNS records, it just compares the record names and SHA2 hash values. It doesn't look at the usage flags, selectors and mtypes. I never had a use case where this should be necessary.
- * Its probably full of bashisms. I'm no an expert in religion and politics.
  * Did I mention that this hasn't been tested much?
 
 ## ACKs
 
-Most thanks go to @github/lukas2511 and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
+Most thanks go to [lukas2511](https://github.com/lukas2511) and contributors for dehydrated. And to Let's Encrypt of course for encrypting the whole universe planet by planet.
