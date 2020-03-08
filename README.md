@@ -4,7 +4,6 @@ Dehydrated Authentication of Named Entities
 A plug-in for [dehydrated](https://github.com/lukas2511/dehydrated) to create DNS TLSA records.
 
 ## Some Warnings
-This has been cobbled together rather quickly and it hasn't been tested very much.
 
 Its easy to shoot yourself in the foot with TLSA entries, and render your **services unusable** and **all of your mail undeliverable**. 
 
