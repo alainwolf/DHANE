@@ -1,7 +1,7 @@
 # DHANE
 Dehydrated Authentication of Named Entities
 
-A plug-in for [dehydrated](https://github.com/lukas2511/dehydrated) to create DNS TLSA records.
+A plug-in for [dehydrated](https://github.com/dehydrated-io/dehydrated) to create DNS TLSA records.
 
 ## Some Warnings
 
@@ -19,7 +19,7 @@ The script calls **pdnsutil** to create the records in DNS.
 It also uses **dig** for DNS queries.
 
 ## Installation
-Call it in your dehydrated [hook script](https://github.com/lukas2511/dehydrated/blob/master/docs/examples/hook.sh) with the **deploy_cert()** and maybe also **unchanged_cert()** hook.
+Call it in your dehydrated [hook script](https://github.com/dehydrated-io/dehydrated/blob/master/docs/examples/hook.sh) with the **deploy_cert()** and maybe also **unchanged_cert()** hook.
 
 ```
 deploy_cert() {
