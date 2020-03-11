@@ -63,7 +63,6 @@ Besides that you can customize the TTL of your DNS records, and pick your favori
  * It never deletes any DNS records. Just checks if the required ones are already there and adds new ones as needed.
  * It won't create TLSA records of un-hashed full certificates or public keys (mtype 0). 
  * While checking existing DNS records, it just compares the record names and SHA2 hash values. It doesn't look at the usage flags, selectors and mtypes. I never had a use case where this should be necessary.
- * Did I mention that this hasn't been tested much?
 
 ## ACKs
 
