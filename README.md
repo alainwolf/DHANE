@@ -3,14 +3,6 @@ Dehydrated Authentication of Named Entities
 
 A plug-in for [dehydrated](https://github.com/dehydrated-io/dehydrated) to create DNS TLSA records.
 
-## Some Warnings
-
-Its easy to shoot yourself in the foot with TLSA entries, and render your **services unusable** and **all of your mail undeliverable**. 
-
-After that has happened, it will take at minimum the TTL of your DNS records, to pull the bullet out of your foot again and stop the bleeding.
-
-Please try this at home, with some inexistent or unimportant services, first.
-
 ## Requirements
 
 ### PowerDNS Authoritative Server
@@ -54,14 +46,14 @@ The DNS records can be in different domains, as long as **pdnsutil** is able to 
 
 ## Configuration
 
-You need to set the IP address of your DNS master in the script. 
+You need to set the IP address of your DNS master in the script.
 
 Besides that you can customize the TTL of your DNS records, and pick your favorites from the usual menu of TLSA **usage flags**, **selectors** and **mtypes**, While the set defaults are sane, selector 0 (full certificate in DNS) is not implemented.
 
 ## Limitations
 
  * It never deletes any DNS records. Just checks if the required ones are already there and adds new ones as needed.
- * It won't create TLSA records of un-hashed full certificates or public keys (mtype 0). 
+ * It won't create TLSA records of un-hashed full certificates or public keys (mtype 0).
  * While checking existing DNS records, it just compares the record names and SHA2 hash values. It doesn't look at the usage flags, selectors and mtypes. I never had a use case where this should be necessary.
 
 ## ACKs
