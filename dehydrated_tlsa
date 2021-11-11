@@ -24,7 +24,7 @@ dns_server="127.0.0.1"
 # Optional: Use an empty string to use your servers/domain default TTL
 tlsa_ttl=""
 
-# TLSA usage flag: 
+# TLSA usage flag:
 #   0: PKIX-TA: CA certificate or public key with PKIX validation.
 #   1: PKIX-EE: Service certificate or public key with PKIX validation.
 #   2: DANE-TA: CA certificate or public key.
@@ -39,7 +39,7 @@ tlsa_selector="1"
 # TLSA content matching type:
 #   0: Full certificate or public key (Not recommended! Not implemented!)
 #   1: SHA256 hash of cert or public key (Recommended)
-#   2: SHA512 hash of cert or public key 
+#   2: SHA512 hash of cert or public key
 tlsa_mtype=1
 
 # ---------------
@@ -51,18 +51,18 @@ HOOK="$1"
 if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
 
     # Command-line submitted by dehydrated
-    #DOMAIN="$2" 
-    #KEYFILE="$3" 
-    CERTFILE="$4" 
-    #FULLCHAINFILE="$5" 
-    CHAINFILE="$6" 
+    #DOMAIN="$2"
+    #KEYFILE="$3"
+    CERTFILE="$4"
+    #FULLCHAINFILE="$5"
+    CHAINFILE="$6"
     #TIMESTAMP="$7"
 
     # Also exported by dehydrated:
     # ALPNCERTDIR
     # altnames
-    # BASEDIR 
-    # CERTDIR 
+    # BASEDIR
+    # CERTDIR
     # CHALLENGETYPE#
     # COMMAND
     # CONFIG
@@ -71,7 +71,7 @@ if [[ ${HOOK} == 'deploy_cert' || ${HOOK} == 'unchanged_cert' ]]; then
     # WELLKNOWN#
 
 elif [[ ${HOOK} == 'clear_dns' ]]; then
-    CERTFILE="$2" 
+    CERTFILE="$2"
 fi
 
 updated_zones=''
@@ -106,13 +106,13 @@ get_certfile_pubkey_hash() {
 
 # Hash of the public key of a PEM private key file.
 get_keyfile_pubkey_hash() {
-    get_keyfile_pubkey "$1" | get_hash 
+    get_keyfile_pubkey "$1" | get_hash
 }
 
 # Get the zone part of FQDN DNS record
 get_dns_zone() {
     local soa
-    
+
     # Look-up the SOA in DNS to get the zone (space- or tab-delimited).
     soa=$( dig @${dns_server} +noall +authority -t SOA -q "$1" )
 
@@ -165,7 +165,7 @@ delete_dns_rr_set() {
 
     echo "  + Deleting all TLSA records for $rr_name from $zone!"
     pdnsutil delete-rrset "$zone" "$rr_name" $rr_type
-    
+
     # Update the list of modified zones
     updated_zones=$( echo "$updated_zones $zone" | tr ' ' '\n' | sort -u )
 }
@@ -176,7 +176,7 @@ tlsa_file="$( dirname "$CERTFILE" )/tlsa.txt"
 if [[ -f $tlsa_file ]]; then
 
     echo " + DANE/TLSA names for $( basename "$( dirname "$CERTFILE" )" ) found."
-    
+
     if [[ -f "$(dirname "$CERTFILE")/privkey.roll.pem" ]]; then
         ROLLOVER_KEYFILE="$(dirname "$CERTFILE")/privkey.roll.pem"
     else
@@ -239,7 +239,7 @@ if [[ -f $tlsa_file ]]; then
             1 )
                 # Hash the public key
                 echo " + Digesting the public key of the active certificate with $tlsa_hash_algo ..."
-                tlsa_hash="$( get_certfile_pubkey_hash "$tlsa_cert" )" 
+                tlsa_hash="$( get_certfile_pubkey_hash "$tlsa_cert" )"
 
                 # Do we have a roll-over key?
                 if [[ -r $ROLLOVER_KEYFILE ]]; then
@@ -261,7 +261,7 @@ if [[ -f $tlsa_file ]]; then
     # Read the tlsa.txt file, line by line.
     # shellcheck disable=SC2162
     while read line; do
-        
+
         # Ignore if its a comment
         case "$line" in \#*) continue ;; esac
 
@@ -270,7 +270,7 @@ if [[ -f $tlsa_file ]]; then
 
         # Ignore empty lines
         if [[ -z "$line" ]]; then
-            continue 
+            continue
         fi
 
         # Read DNS record name
@@ -283,6 +283,9 @@ if [[ -f $tlsa_file ]]; then
 
             # Assume nothing
             tlsa_dns_has_been_updated=0
+
+            # Give the DNS server some time, to avoid duplicate records
+            sleep 30s
 
             # Query DNS for any existing TLSA records
             echo -n "  + Looking up existing records in DNS ... "
@@ -309,7 +312,7 @@ if [[ -f $tlsa_file ]]; then
                     # Does this hash match with current cert or key hash?
                     echo -n "   + Comparing record $i of $tlsa_dns_rr_count ... "
                     if [[ "$tlsa_dns_hash" == "$tlsa_hash" ]]; then
-                    
+
                         # Active cert/key match found, nothing to do
                         echo "match found (skipping update)."
                         cert_dns_needs_update=0
@@ -317,7 +320,7 @@ if [[ -f $tlsa_file ]]; then
                     else
                         echo "no match."
                     fi
-                    
+
                     # If we ever get here, there was no match
                     cert_dns_needs_update=1
                 done
@@ -335,7 +338,7 @@ if [[ -f $tlsa_file ]]; then
                         # Does this hash match with current roll-over key hash?
                         echo -n "   + Comparing record $i of $tlsa_dns_rr_count ... "
                         if [[ "$tlsa_dns_hash" == "$tlsa_rollover_hash" ]]; then
-                        
+
                             # Rollover key match found, nothing to do
                             echo "roll-over key match found (skipping update)."
                             rollover_dns_needs_update=0
@@ -349,7 +352,7 @@ if [[ -f $tlsa_file ]]; then
                     done
                 fi
             else
-                
+
                 # No DNS records found
                 echo "none found."
                 cert_dns_needs_update=1
@@ -390,7 +393,7 @@ if [[ -f $tlsa_file ]]; then
             # Calling example:
             #   ./dehydrated_tlsa "clear_dns" "/etc/dehydrated/certs/example.net/cert.pem"
 
-            delete_dns_rr_set "$tlsa_rr_name" 
+            delete_dns_rr_set "$tlsa_rr_name"
             tlsa_dns_has_been_updated=1
         fi
 
