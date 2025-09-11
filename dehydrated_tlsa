@@ -42,9 +42,171 @@ tlsa_selector="1"
 #   2: SHA512 hash of cert or public key
 tlsa_mtype=1
 
+# Settings for the PowerDNS API are set in the dehydrated configuration files
+# They use the same format and are compaitble with https://github.com/silkeh/pdns_api.sh
+
 # ---------------
 # End of Settings
 # ---------------
+
+# Load the configuration and set default values
+# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+load_config() {
+  # Check for config in various locations
+  # From letsencrypt.sh
+  if [[ -z "${CONFIG:-}" ]]; then
+    for check_config in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
+      if [[ -f "${check_config}/config" ]]; then
+        CONFIG="${check_config}/config"
+        break
+      fi
+    done
+  fi
+
+  # Check if config was set
+  if [[ -z "${CONFIG:-}" ]]; then
+    # Warn about missing config
+    warn "No config file found, using default config!"
+  elif [[ -f "${CONFIG}" ]]; then
+    # shellcheck disable=SC1090
+    . "${CONFIG}"
+  fi
+
+  if [[ -n "${CONFIG_D:-}" ]]; then
+    if [[ ! -d "${CONFIG_D}" ]]; then
+      fatalerror "The path ${CONFIG_D} specified for CONFIG_D does not point to a directory."
+    fi
+
+    # Allow globbing
+    if [[ -n "${ZSH_VERSION:-}" ]]
+    then
+      set +o noglob
+    else
+      set +f
+    fi
+
+    for check_config_d in "${CONFIG_D}"/*.sh; do
+      if [[ -f "${check_config_d}" ]] && [[ -r "${check_config_d}" ]]; then
+        echo "# INFO: Using additional config file ${check_config_d}"
+        # shellcheck disable=SC1090
+        . "${check_config_d}"
+      else
+        fatalerror "Specified additional config ${check_config_d} is not readable or not a file at all."
+      fi
+    done
+
+    # Disable globbing
+    if [[ -n "${ZSH_VERSION:-}" ]]
+    then
+      set -o noglob
+    else
+      set -f
+    fi
+  fi
+
+
+  # Check required settings
+  [[ -n "${PDNS_HOST:-}" ]] || fatalerror "PDNS_HOST setting is required."
+  [[ -n "${PDNS_KEY:-}" ]]  || fatalerror "PDNS_KEY setting is required."
+
+  # Check optional settings
+  [[ -n "${PDNS_PORT:-}" ]] || PDNS_PORT=8081
+  # Check if PDNS_CURL_OPTS is unset
+  [[ -n "${PDNS_CURL_OPTS+empty}" ]] || PDNS_CURL_OPTS=${CURL_OPTS:-}
+}
+
+# Load the zones from file
+# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+load_zones() {
+  # Check for zones.txt in various locations
+  if [[ -z "${PDNS_ZONES_TXT:-}" ]]; then
+    for check_zones in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
+      if [[ -f "${check_zones}/zones.txt" ]]; then
+        PDNS_ZONES_TXT="${check_zones}/zones.txt"
+        break
+      fi
+    done
+  fi
+
+  # Load zones
+  all_zones=()
+  if [[ -n "${PDNS_ZONES_TXT:-}" ]] && [[ -f "${PDNS_ZONES_TXT}" ]]; then
+    mapfile -t all_zones < "${PDNS_ZONES_TXT}"
+  fi
+}
+
+# Setup of connection settings
+# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+setup() {
+  # Header values
+  api_header="X-API-Key: ${PDNS_KEY}"
+  content_header="Content-Type: application/json"
+
+  # Set the URL to the host if it is a URL,
+  # otherwise create it from the host and port.
+  if [[ "${PDNS_HOST}" == http://* || "${PDNS_HOST}" == https://* ]]; then
+    url="${PDNS_HOST}"
+  else
+    url="http://${PDNS_HOST}:${PDNS_PORT}"
+  fi
+
+  # Detect the version
+  if [[ -z "${PDNS_VERSION:-}" ]]; then
+    request "GET" "${url}/api" ""
+    PDNS_VERSION="$(<<< "${res}" get_json_int_value version)"
+  fi
+
+  # Fallback to version 0
+  if [[ -z "${PDNS_VERSION}" ]]; then
+    PDNS_VERSION=0
+  fi
+
+  # Some version incompatibilities
+  if [[ "${PDNS_VERSION}" -ge 1 ]]; then
+    url="${url}/api/v${PDNS_VERSION}"
+  fi
+
+  # Detect the server
+  if [[ -z "${PDNS_SERVER:-}" ]]; then
+    request "GET" "${url}/servers" ""
+    PDNS_SERVER="$(<<< "${res}" get_json_string_value id)"
+  fi
+
+  # Fallback to localhost
+  if [[ -z "${PDNS_SERVER}" ]]; then
+    PDNS_SERVER="localhost"
+  fi
+
+  # Zone endpoint on the API
+  url="${url}/servers/${PDNS_SERVER}/zones"
+
+  # Get a zone list from the API if none was set
+  if [[ ${#all_zones[@]} -eq 0 ]]; then
+    request "GET" "${url}" ""
+    mapfile -t all_zones < <(<<< "${res//, /$',\n'}" get_json_string_value name)
+  fi
+
+  # Strip trailing dots from zones
+  all_zones=("${all_zones[@]//$'.\n'/ }")
+  all_zones=("${all_zones[@]%.}")
+
+  # Sort zones to list most specific first
+  mapfile -t all_zones < <(printf '%s\n' "${all_zones[@]}" | rev | sort | rev)
+
+  # Set suffix in case of CNAME redirection
+  if [[ -n "${PDNS_SUFFIX:-}" ]]; then
+      suffix=".${PDNS_SUFFIX}"
+  else
+      suffix=""
+  fi
+
+  # Debug setup result
+  debug "# Setup"
+  debug "API version: ${PDNS_VERSION}"
+  debug "PDNS server: ${PDNS_SERVER}"
+  debug "Zones: $(printf '%s ' "${all_zones[@]}")"
+  debug "Suffix: \"${suffix}\""
+}
 
 HOOK="$1"
 
