@@ -11,6 +11,8 @@ This branch aims to modernize the DNS management functionality in DHANE by repla
 ### Current Status
 🚧 **In Development** - Initial planning and development phase
 
+Track: [Move from `pdnsutil` to PowerDNS API calls #2](https://github.com/alainwolf/DHANE/issues/2)
+
 ### Goals
 - Replace all `pdnsutil` command-line calls with PowerDNS HTTP API requests
 - Improve error handling and response validation
