@@ -3,7 +3,51 @@ Dehydrated Authentication of Named Entities
 
 A plug-in for [dehydrated](https://github.com/dehydrated-io/dehydrated) to create DNS TLSA records.
 
-## Requirements
+## Branch: powerdns-api-migration
+
+### Overview
+This branch aims to modernize the DNS management functionality in DHANE by replacing the current `pdnsutil` command-line tool usage with direct PowerDNS HTTP API calls.
+
+### Current Status
+🚧 **In Development** - Initial planning and development phase
+
+### Goals
+- Replace all `pdnsutil` command-line calls with PowerDNS HTTP API requests
+- Improve error handling and response validation
+- Add support for API authentication (API keys)
+- Maintain backward compatibility with existing configuration
+- Enhance performance by reducing subprocess overhead
+
+### Changes Planned
+
+#### DNS Functions to Migrate
+The following functions in [`dehydrated_tlsa`](dehydrated_tlsa) will be updated:
+
+- `create_dns_rr()` - Replace `pdnsutil add-record` with API POST requests
+- `delete_dns_rr_set()` - Replace `pdnsutil delete-rrset` with API DELETE requests
+- Zone management operations:
+  - Replace `pdnsutil rectify-zone` with API rectify endpoint
+  - Replace `pdnsutil increase-serial` with API serial increment
+  - Replace `pdnsutil check-zone` with API validation
+
+#### New Configuration Options
+Additional settings will be added to support API connectivity:
+- PowerDNS API endpoint URL
+- API authentication key
+- HTTP timeout settings
+- SSL/TLS verification options
+
+### Benefits
+- **Better Integration**: Direct API calls provide more reliable communication
+- **Enhanced Error Handling**: Structured JSON responses vs. parsing command output
+- **Improved Performance**: Eliminate subprocess overhead from `pdnsutil` calls
+- **Modern Architecture**: Move away from command-line dependency to HTTP API
+- **Better Monitoring**: Structured logging and response validation
+
+### Compatibility
+The branch will maintain full compatibility with existing [`tlsa.txt`](README.md#defining-tlsa-records) configuration files and dehydrated hook integration.
+
+### Requirements
 
 ### PowerDNS Authoritative Server
 Since I use PowerDNS myself, its written for its command and control utility.
