@@ -5,14 +5,29 @@
 # https://github.com/alainwolf/DHANE
 #
 # This script is licensed under The MIT License (see LICENSE for more information).
+# Parts based on pdns_api.sh by silkeh (https://github.com/silkeh/pdns_api.sh)
 #
 
-# Bail out on errors
+# Terminate on error, unknown variables and errors in pipelines
 set -e
+set -o pipefail
+set -u
 shopt -s inherit_errexit
 
-# Bail out on unknown var
-set -u
+# Local directory
+DIR="$(dirname "$0")"
+
+# Config directories
+CONFIG_DIRS="/etc/dehydrated /usr/local/etc/dehydrated"
+
+# Show an error/warning
+error() { echo "Error: $*" >&2; }
+warn() { echo "Warning: $*" >&2; }
+fatalerror() { error "$*"; exit 1; }
+
+# Debug message
+debug() { [[ -z "${DEBUG:-}" ]] || echo "$@"; }
+
 
 # -----------------
 # Start of Settings
@@ -52,162 +67,325 @@ tlsa_mtype=1
 # ---------------
 
 # Load the configuration and set default values
-# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+# Adapted from pdns_api.sh
 load_config() {
-  # Check for config in various locations
-  # From letsencrypt.sh
-  if [[ -z "${CONFIG:-}" ]]; then
-    for check_config in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
-      if [[ -f "${check_config}/config" ]]; then
-        CONFIG="${check_config}/config"
-        break
-      fi
-    done
-  fi
-
-  # Check if config was set
-  if [[ -z "${CONFIG:-}" ]]; then
-    # Warn about missing config
-    warn "No config file found, using default config!"
-  elif [[ -f "${CONFIG}" ]]; then
-    # shellcheck disable=SC1090
-    . "${CONFIG}"
-  fi
-
-  if [[ -n "${CONFIG_D:-}" ]]; then
-    if [[ ! -d "${CONFIG_D}" ]]; then
-      fatalerror "The path ${CONFIG_D} specified for CONFIG_D does not point to a directory."
+    # Check for config in various locations
+    # From letsencrypt.sh
+    if [[ -z "${CONFIG:-}" ]]; then
+        for check_config in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
+            if [[ -f "${check_config}/config" ]]; then
+                CONFIG="${check_config}/config"
+                break
+            fi
+        done
     fi
 
-    # Allow globbing
-    if [[ -n "${ZSH_VERSION:-}" ]]
-    then
-      set +o noglob
+    # Do we have a config file from dehydrated?
+    if [[ -z "${CONFIG:-}" ]]; then
+
+        # Warn about missing config
+        warn "No config file found, using default config!"
+
+    elif [[ -f "${CONFIG}" ]]; then
+
+        # Load the dehydrated config file
+        # shellcheck source=/etc/dehydrated/config
+        source "${CONFIG}"
+    fi
+
+    # Is a directory for additional config files set?
+    if [[ -n "${CONFIG_D:-}" ]]; then
+        if [[ ! -d "${CONFIG_D}" ]]; then
+            fatalerror "The path ${CONFIG_D} specified for CONFIG_D does not point to a directory."
+        fi
+
+        # Allow globbing
+        if [[ -n "${ZSH_VERSION:-}" ]]; then
+            set +o noglob
+        else
+            set +f
+        fi
+
+        for check_config_d in "${CONFIG_D}"/*.sh; do
+            if [[ -f "${check_config_d}" ]] && [[ -r "${check_config_d}" ]]; then
+                echo "# INFO: Using additional config file ${check_config_d}"
+                # shellcheck disable=SC1090
+                source "${check_config_d}"
+            else
+                fatalerror "Specified additional config ${check_config_d} is not readable or not a file at all."
+            fi
+        done
+
+        # Disable globbing
+        if [[ -n "${ZSH_VERSION:-}" ]]; then
+            set -o noglob
+        else
+            set -f
+        fi
+    fi
+
+    # -------------------------------------
+    # Check required settings
+    # -------------------------------------
+
+    # Do we have a PowerDNS API server setting?
+    if [[ -n "${DHANE_PDNS_HOST:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_HOST:-}" ]]; then
+            DHANE_PDNS_HOST="${PDNS_HOST}"
+        else
+            fatalerror "No PowerDNS API server set! Check your configuration (DHANE_PDNS_HOST)!"
+        fi
+    fi
+
+    # Do we have a PowerDNS API key setting?
+    if [[ -n "${DHANE_PDNS_KEY:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_KEY:-}" ]]; then
+            DHANE_PDNS_KEY="${PDNS_KEY}"
+        else
+            fatalerror "No PowerDNS API server set! Check your configuration (DHANE_PDNS_HOST)!"
+        fi
+    fi
+
+    # -------------------------------------
+    # Check optional settings and defaults
+    # -------------------------------------
+
+    # Do we have a port number set for the PowerDNS API server?
+    if [[ -n "${DHANE_PDNS_PORT:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_PORT:-}" ]]; then
+            DHANE_PDNS_PORT="${PDNS_PORT}"
+        else
+            # Set default port number
+            DHANE_PDNS_PORT=8081
+        fi
+    fi
+
+    # DNS server to query for TLSA records
+    if [[ -n "${DHANE_DNS_SERVER:-}" ]]; then
+
+        # Send DNS queries to the PowerDNS API server address
+        DHANE_DNS_SERVER="${DHANE_PDNS_HOST}"
+    fi
+
+    # Check if curl command-line options have been set
+    if [[ -n "${DHANE_PDNS_CURL_OPTS+empty}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_PORT:-}" ]]; then
+            DHANE_PDNS_CURL_OPTS=${PDNS_CURL_OPTS:-}
+
+        # Is there a setting from dehydrated as fallback?
+        elif [[ -n "${CURL_OPTS:-}" ]]; then
+            DHANE_PDNS_CURL_OPTS=${CURL_OPTS}
+        else
+
+            # Set default (no options)
+            DHANE_PDNS_CURL_OPTS=""
+        fi
+    fi
+
+    # PowerDNS backend for the API server to use, usually `localhost`
+    if [[ -n "${DHANE_PDNS_SERVER:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_SERVER:-}" ]]; then
+            DHANE_PDNS_SERVER="${PDNS_SERVER}"
+        else
+            # Set default ()localhost)
+            DHANE_PDNS_SERVER="localhost"
+        fi
+    fi
+
+    # Delay in seconds for API requests and DNS queries
+    if [[ -n "${DHANE_PDNS_WAIT:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_WAIT:-}" ]]; then
+            DHANE_PDNS_WAIT="${PDNS_WAIT}"
+        else
+            # Set default (no delay)
+            DHANE_PDNS_WAIT=0
+        fi
+    fi
+
+    # File containing managed zones
+    if [[ -n "${DHANE_PDNS_ZONES_TXT:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_ZONES_TXT:-}" ]]; then
+            DHANE_PDNS_ZONES_TXT="${PDNS_ZONES_TXT}"
+        fi
+    fi
+
+    # Disable sending DNS NOTIFY to secondary servers after zone updates
+    if [[ -n "${DHANE_PDNS_NO_NOTIFY:-}" ]]; then
+
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS__NO_NOTIFY:-}" ]]; then
+            DHANE_PDNS_NO_NOTIFY="${PDNS_NO_NOTIFY}"
+        fi
+    fi
+
+    # TTL (time-to-live) in seconds for the TLSA DNS records
+    if [[ -n "${DHANE_TLSA_TTL:-}" ]]; then
+
+        # Use the PowerdNS default TTL if empty
+        DHANE_TLSA_TTL=""
+    fi
+
+    # Usage flag in the TLSA DNS records
+    if [[ -n "${DHANE_TSLA_USAGE:-}" ]]; then
+
+        # Set default to 3 (DANE-EE) as default
+        DHANE_TSLA_USAGE="3"
+
     else
-      set +f
+
+        # Check if if the setting is valid
+        if ! [[ "${DHANE_TSLA_USAGE}" =~ ^[0-3]$ ]]; then
+            fatalerror "Invalid TLSA usage flag (usage: ${DHANE_TSLA_USAGE})!"
+        fi
+
     fi
 
-    for check_config_d in "${CONFIG_D}"/*.sh; do
-      if [[ -f "${check_config_d}" ]] && [[ -r "${check_config_d}" ]]; then
-        echo "# INFO: Using additional config file ${check_config_d}"
-        # shellcheck disable=SC1090
-        . "${check_config_d}"
-      else
-        fatalerror "Specified additional config ${check_config_d} is not readable or not a file at all."
-      fi
-    done
+    # Usage flag in the TLSA DNS records
+    if [[ -n "${DHANE_TLSA_SELECTOR:-}" ]]; then
 
-    # Disable globbing
-    if [[ -n "${ZSH_VERSION:-}" ]]
-    then
-      set -o noglob
+        # Set default to 1 (Public key only) as default
+        DHANE_TLSA_SELECTOR="1"
+     else
+
+        # Check if if the setting is valid
+        if ! [[ "${DHANE_TLSA_SELECTOR}" =~ ^[0-1]$ ]]; then
+            fatalerror "Invalid TLSA selector (selector: ${DHANE_TLSA_SELECTOR})!"
+        fi
+    fi
+
+    # TLSA content matching type:
+    if [[ -n "${DHANE_TLSA_MTYPE:-}" ]]; then
+
+        # Set default to 1 (SHA256 hash) as default
+        DHANE_TLSA_MTYPE="1"
     else
-      set -f
+
+        # Check if if the setting is valid
+        if ! [[ "${DHANE_TLSA_MTYPE}" =~ ^[0-2]$ ]]; then
+            fatalerror "Invalid TLSA content type (mtype: ${DHANE_TLSA_MTYPE})!"
+        fi
+
+        # Check if mtype 0 was selected
+        if [[ "${DHANE_TLSA_MTYPE}" == "0" ]]; then
+            fatalerror "Full TLSA certificate (mtype 0) is not supported here!"
+        fi
     fi
-  fi
+# DHANE_TLSA_DOMAIN="dane.brtx.net"
 
-
-  # Check required settings
-  [[ -n "${PDNS_HOST:-}" ]] || fatalerror "PDNS_HOST setting is required."
-  [[ -n "${PDNS_KEY:-}" ]]  || fatalerror "PDNS_KEY setting is required."
-
-  # Check optional settings
-  [[ -n "${PDNS_PORT:-}" ]] || PDNS_PORT=8081
-  # Check if PDNS_CURL_OPTS is unset
-  [[ -n "${PDNS_CURL_OPTS+empty}" ]] || PDNS_CURL_OPTS=${CURL_OPTS:-}
 }
 
 # Load the zones from file
-# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+# Adapted from pdns_api.sh
 load_zones() {
-  # Check for zones.txt in various locations
-  if [[ -z "${PDNS_ZONES_TXT:-}" ]]; then
-    for check_zones in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
-      if [[ -f "${check_zones}/zones.txt" ]]; then
-        PDNS_ZONES_TXT="${check_zones}/zones.txt"
-        break
-      fi
-    done
-  fi
+    # Check for zones.txt in various locations
+    if [[ -z "${DHANE_PDNS_ZONES_TXT:-}" ]]; then
+        for check_zones in ${CONFIG_DIRS} "${PWD}" "${DIR}"; do
+            if [[ -f "${check_zones}/zones.txt" ]]; then
+                DHANE_PDNS_ZONES_TXT="${check_zones}/zones.txt"
+                break
+            fi
+        done
+    fi
 
-  # Load zones
-  all_zones=()
-  if [[ -n "${PDNS_ZONES_TXT:-}" ]] && [[ -f "${PDNS_ZONES_TXT}" ]]; then
-    mapfile -t all_zones < "${PDNS_ZONES_TXT}"
-  fi
+    # Load zones
+    all_zones=()
+    if [[ -n "${DHANE_PDNS_ZONES_TXT:-}" ]] && [[ -f "${DHANE_PDNS_ZONES_TXT}" ]]; then
+        mapfile -t all_zones <"${DHANE_PDNS_ZONES_TXT}"
+    fi
 }
 
 # Setup of connection settings
-# Stolen from https://github.com/silkeh/pdns_api.sh/blob/master/pdns_api.sh
+# Adapted from pdns_api.sh
 setup() {
-  # Header values
-  api_header="X-API-Key: ${PDNS_KEY}"
-  content_header="Content-Type: application/json"
+    # Header values
+    api_header="X-API-Key: ${DHANE_PDNS_KEY}"
+    content_header="Content-Type: application/json"
 
-  # Set the URL to the host if it is a URL,
-  # otherwise create it from the host and port.
-  if [[ "${PDNS_HOST}" == http://* || "${PDNS_HOST}" == https://* ]]; then
-    url="${PDNS_HOST}"
-  else
-    url="http://${PDNS_HOST}:${PDNS_PORT}"
-  fi
+    # Set the URL to the host if it is a URL,
+    # otherwise create it from the host and port.
+    if [[ "${DHANE_PDNS_HOST}" == http://* || "${DHANE_PDNS_HOST}" == https://* ]]; then
+        url="${DHANE_PDNS_HOST}"
+    else
+        url="http://${DHANE_PDNS_HOST}:${DHANE_PDNS_PORT}"
+    fi
 
-  # Detect the version
-  if [[ -z "${PDNS_VERSION:-}" ]]; then
-    request "GET" "${url}/api" ""
-    PDNS_VERSION="$(<<< "${res}" get_json_int_value version)"
-  fi
+    # Detect the version
+    if [[ -z "${DHANE_PDNS_VERSION:-}" ]]; then
+        request "GET" "${url}/api" ""
+        DHANE_PDNS_VERSION="$(<<<"${res}" get_json_int_value version)"
+    fi
 
-  # Fallback to version 0
-  if [[ -z "${PDNS_VERSION}" ]]; then
-    PDNS_VERSION=0
-  fi
+    # Fallback to version 0 (pre-4.0 PowerDNS)
+    if [[ -z "${DHANE_PDNS_VERSION}" ]]; then
+        DHANE_PDNS_VERSION=0
+    fi
 
-  # Some version incompatibilities
-  if [[ "${PDNS_VERSION}" -ge 1 ]]; then
-    url="${url}/api/v${PDNS_VERSION}"
-  fi
+    # Some version incompatibilities
+    if [[ "${DHANE_PDNS_VERSION}" -ge 1 ]]; then
+        url="${url}/api/v${DHANE_PDNS_VERSION}"
+    fi
 
-  # Detect the server
-  if [[ -z "${PDNS_SERVER:-}" ]]; then
-    request "GET" "${url}/servers" ""
-    PDNS_SERVER="$(<<< "${res}" get_json_string_value id)"
-  fi
+    # Detect the PowerDNS backend server behind the API server
+    if [[ -z "${DHANE_PDNS_SERVER:-}" ]]; then
+        request "GET" "${url}/servers" ""
+        DHANE_PDNS_SERVER="$(<<<"${res}" get_json_string_value id)"
+    fi
 
-  # Fallback to localhost
-  if [[ -z "${PDNS_SERVER}" ]]; then
-    PDNS_SERVER="localhost"
-  fi
+    # Fallback to localhost
+    if [[ -z "${DHANE_PDNS_SERVER}" ]]; then
 
-  # Zone endpoint on the API
-  url="${url}/servers/${PDNS_SERVER}/zones"
+        # Is there a setting from pdns_api.sh as fallback?
+        if [[ -n "${PDNS_SERVER:-}" ]]; then
+            DHANE_PDNS_SERVER="${PDNS_SERVER}"
+        else
+            # Set default (localhost)
+            DHANE_PDNS_SERVER="localhost"
+        fi
+    fi
 
-  # Get a zone list from the API if none was set
-  if [[ ${#all_zones[@]} -eq 0 ]]; then
-    request "GET" "${url}" ""
-    mapfile -t all_zones < <(<<< "${res//, /$',\n'}" get_json_string_value name)
-  fi
+    # Zone endpoint on the API
+    url="${url}/servers/${PDNS_SERVER}/zones"
 
-  # Strip trailing dots from zones
-  all_zones=("${all_zones[@]//$'.\n'/ }")
-  all_zones=("${all_zones[@]%.}")
+    # Get a zone list from the API if none was set
+    if [[ ${#all_zones[@]} -eq 0 ]]; then
+        request "GET" "${url}" ""
+        mapfile -t all_zones < <(<<<"${res//, /$',\n'}" get_json_string_value name)
+    fi
 
-  # Sort zones to list most specific first
-  mapfile -t all_zones < <(printf '%s\n' "${all_zones[@]}" | rev | sort | rev)
+    # Strip trailing dots from zones
+    all_zones=("${all_zones[@]//$'.\n'/ }")
+    all_zones=("${all_zones[@]%.}")
 
-  # Set suffix in case of CNAME redirection
-  if [[ -n "${PDNS_SUFFIX:-}" ]]; then
-      suffix=".${PDNS_SUFFIX}"
-  else
-      suffix=""
-  fi
+    # Sort zones to list most specific first
+    mapfile -t all_zones < <(printf '%s\n' "${all_zones[@]}" | rev | sort | rev)
 
-  # Debug setup result
-  debug "# Setup"
-  debug "API version: ${PDNS_VERSION}"
-  debug "PDNS server: ${PDNS_SERVER}"
-  debug "Zones: $(printf '%s ' "${all_zones[@]}")"
-  debug "Suffix: \"${suffix}\""
+    # Set suffix in case of CNAME redirection
+    if [[ -n "${PDNS_SUFFIX:-}" ]]; then
+        suffix=".${PDNS_SUFFIX}"
+    else
+        suffix=""
+    fi
+
+    # Debug setup result
+    debug "# Setup"
+    debug "API version: ${PDNS_VERSION}"
+    debug "PDNS server: ${PDNS_SERVER}"
+    debug "Zones: $(printf '%s ' "${all_zones[@]}")"
+    debug "Suffix: \"${suffix}\""
 }
 
 HOOK="$1"
@@ -628,6 +806,5 @@ if [[ -f ${tlsa_file} ]]; then
         done
     fi
 fi
-
 
 # -*- mode: bash; tab-width: 4; indent-tabs-mode: nil -*-
