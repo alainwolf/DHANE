@@ -14,11 +14,10 @@ This branch aims to modernize the DNS management functionality in DHANE by repla
 Track: [Move from `pdnsutil` to PowerDNS API calls #2](https://github.com/alainwolf/DHANE/issues/2)
 
 ### Goals
-- Replace all `pdnsutil` command-line calls with PowerDNS HTTP API requests
-- Improve error handling and response validation
-- Add support for API authentication (API keys)
-- Maintain backward compatibility with existing configuration
-- Enhance performance by reducing subprocess overhead
+- PowerDNS HTTP API requests instead of the `pdnsutil` command-line utility;
+- Move configuration variables to the dehydrated configuration file
+  - inlcudes possiblity to set certificate specific configuratoion options
+- Maintain compatiblity and re-use configuration values from PDNS hook script
 
 ### Changes Planned
 
