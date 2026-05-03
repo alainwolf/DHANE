@@ -89,76 +89,32 @@ get_hash() {
 
 # Get the DER formatted public key blob from a PEM certificate file.
 get_certfile_pubkey() {
-    local cert_file="$1"
-    local pubkey_pem
-    local pubkey_der
-
-    # Extract the public key in PEM (default) format
-    pubkey_pem=$(
-        openssl x509 -in "${cert_file}" -pubkey -noout
-    )
-
-    # Convert PEM pubkey to DER format, and remove any null byte characters
-    pubkey_der=$(
-        # shellcheck disable=SC2312
-        echo "${pubkey_pem}" | openssl pkey -pubin -outform DER | tr -d '\0'
-    )
-
-    # Return DER pubkey
-    echo "${pubkey_der}"
+  local cert_file="$1"
+  openssl x509 -in "$cert_file" -pubkey -noout |
+    openssl pkey -pubin -outform DER
 }
 
 # Get the DER formatted public key blob from a PEM private key file.
 get_keyfile_pubkey() {
-    local key_file="$1"
-    local pubkey_pem
-    local pubkey_der
-
-    # Extract the public key in PEM (default) format
-    pubkey_pem=$(
-        openssl pkey -in "${key_file}" -pubout
-    )
-
-    # Convert PEM pubkey to DER format, removing any null bytes
-    pubkey_der=$(
-        # shellcheck disable=SC2312
-        echo "${pubkey_pem}" | openssl pkey -pubin -outform DER | tr -d '\0'
-    )
+  local key_file="$1"
+  openssl pkey -in "$key_file" -pubout |
+    openssl pkey -pubin -outform DER
 }
 
 # Hash of a certificate file in PEM format.
 get_certfile_hash() {
-    local cert_file="$1"
-    local der_output
-    der_output=$(
-        # shellcheck disable=SC2312
-        openssl x509 -in "${cert_file}" --outform DER | tr -d '\0'
-    )
-    echo "${der_output}" | get_hash
+  local cert_file="$1"
+  openssl x509 -in "${cert_file}" -outform DER | get_hash
 }
 
 # Hash of the public key of PEM certificate file.
 get_certfile_pubkey_hash() {
-    local pubkey_output
-    # trunk-ignore(shellcheck/SC2310)
-    if ! pubkey_output=$(get_certfile_pubkey "$1"); then
-        return 1
-    fi
-    echo "${pubkey_output}" | get_hash
+  get_certfile_pubkey "$1" | get_hash
 }
 
 # Hash of the public key of a PEM private key file.
 get_keyfile_pubkey_hash() {
-    local key_file="$1"
-    local pubkey_output
-
-    # Get the pubkey of the private key file in DER format
-    # shellcheck disable=SC2312
-    pubkey_output=$(
-        get_keyfile_pubkey "${key_file}" | tr -d '\0'
-    )
-
-    echo "${pubkey_output}" | get_hash
+  get_keyfile_pubkey "$1" | get_hash
 }
 
 # Get the zone part of FQDN DNS record
@@ -198,7 +154,18 @@ create_dns_rr() {
     echo "  +     Type: ${mtype}"
     echo "  +     Hash: ${hash}"
     rr_content="${usage} ${selector} ${mtype} ${hash}"
-    pdnsutil add-record "${zone}" "${rr_name}" "${rr_type}" "${rr_ttl}" "${rr_content}"
+
+    args=(add-record "$zone" "$rr_name" "$rr_type")
+    # if rr_ttl is not set, don't pass it, it breaks pdnsutil
+    if [ -n "$rr_ttl" ]; then
+        args+=("$rr_ttl")
+    fi
+
+    args+=("$rr_content")
+
+    pdnsutil "${args[@]}"
+
+
     tlsa_dns_has_been_updated=1
 
     # Update the list of modified zones
