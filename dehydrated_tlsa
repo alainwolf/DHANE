@@ -201,6 +201,9 @@ create_dns_rr() {
     pdnsutil add-record "${zone}" "${rr_name}" "${rr_type}" "${rr_ttl}" "${rr_content}"
     tlsa_dns_has_been_updated=1
 
+    # Give the DNS server some time, to avoid duplicate records
+    sleep 30s
+
     # Update the list of modified zones
     updated_zones=$(echo "${updated_zones} ${zone}" | tr ' ' '\n' | sort -u || true)
 }
@@ -336,9 +339,6 @@ if [[ -f ${tlsa_file} ]]; then
             # Assume nothing
             tlsa_dns_has_been_updated=0
 
-            # Give the DNS server some time, to avoid duplicate records
-            sleep 30s
-
             # Query DNS for any existing TLSA records
             echo -n "  + Looking up existing records in DNS ... "
             tlsa_dns_answer=$(dig @"${dns_server}" +short +norecurse +nosplit \
@@ -463,6 +463,9 @@ if [[ -f ${tlsa_file} ]]; then
             pdnsutil increase-serial "${zone}"
             echo -n " + "
             pdnsutil check-zone "${zone}"
+
+            # Give the DNS server some time, to avoid duplicate records
+            sleep 30s
         done
     fi
 fi
